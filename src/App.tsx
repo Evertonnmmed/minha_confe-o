@@ -17,9 +17,14 @@ import {
   CheckCircle2,
   ChevronRight,
   AlertTriangle,
-  Calendar
+  Calendar,
+  LogOut,
+  Mail,
+  Lock,
+  User as UserIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { supabase } from './supabase';
 import { 
   DashboardData, 
   CompanyInfo, 
@@ -83,9 +88,123 @@ const Badge = ({ children, variant = 'default' }: { children: React.ReactNode, v
   );
 };
 
+// --- Auth Components ---
+
+function Login() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      if (isSignUp) {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        alert('Verifique seu e-mail para confirmar o cadastro!');
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      }
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="w-full max-w-md bg-white rounded-3xl p-8 shadow-xl border border-slate-100"
+      >
+        <div className="flex flex-col items-center mb-8">
+          <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-white mb-4 shadow-lg shadow-indigo-200">
+            <Factory size={32} />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-800">FIBRALTEX 4.1</h1>
+          <p className="text-slate-500 text-sm">Gerenciamento de Confecção Inteligente</p>
+        </div>
+
+        <form onSubmit={handleAuth} className="space-y-4">
+          {error && (
+            <div className="p-3 bg-rose-50 text-rose-600 text-xs rounded-xl border border-rose-100">
+              {error}
+            </div>
+          )}
+          <div>
+            <label className="block text-xs font-bold text-slate-400 uppercase mb-1 ml-1">E-mail</label>
+            <div className="relative">
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input 
+                type="email" 
+                required
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="seu@email.com"
+                className="w-full pl-12 pr-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-400 uppercase mb-1 ml-1">Senha</label>
+            <div className="relative">
+              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input 
+                type="password" 
+                required
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full pl-12 pr-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+              />
+            </div>
+          </div>
+          <button 
+            disabled={loading}
+            type="submit" 
+            className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 disabled:opacity-50"
+          >
+            {loading ? 'Processando...' : (isSignUp ? 'Criar Conta' : 'Entrar')}
+          </button>
+        </form>
+
+        <div className="mt-6 text-center">
+          <button 
+            onClick={() => setIsSignUp(!isSignUp)}
+            className="text-sm text-slate-500 hover:text-indigo-600 transition-colors"
+          >
+            {isSignUp ? 'Já tem uma conta? Entre aqui' : 'Não tem uma conta? Cadastre-se'}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 // --- Main App ---
 
+let currentUserId = 'default_user';
+
+const apiFetch = (url: string, options: any = {}) => {
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...options.headers,
+      'Content-Type': 'application/json',
+      'x-user-id': currentUserId
+    }
+  });
+};
+
 export default function App() {
+  const [session, setSession] = useState<any>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [company, setCompany] = useState<CompanyInfo | null>(null);
@@ -93,18 +212,34 @@ export default function App() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
 
   useEffect(() => {
-    fetchData();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session?.user?.id) currentUserId = session.user.id;
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session?.user?.id) currentUserId = session.user.id;
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (session) {
+      fetchData();
+    }
     // Close sidebar on mobile by default
     if (window.innerWidth < 1024) {
       setIsSidebarOpen(false);
     }
-  }, [activeTab]);
+  }, [activeTab, session]);
 
   const fetchData = async () => {
     try {
       const [settingsRes, dashboardRes] = await Promise.all([
-        fetch('/api/settings'),
-        fetch('/api/dashboard')
+        apiFetch('/api/settings'),
+        apiFetch('/api/dashboard')
       ]);
       const settings = await settingsRes.json();
       const dashboardData = await dashboardRes.json();
@@ -115,6 +250,14 @@ export default function App() {
       console.error('Error fetching data:', error);
     }
   };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+  };
+
+  if (!session) {
+    return <Login />;
+  }
 
   const renderContent = () => {
     switch (activeTab) {
@@ -189,6 +332,17 @@ export default function App() {
               <p className="text-[10px] text-slate-400 truncate">{user?.role || 'Admin'}</p>
             </div>
           </div>
+          <div className="p-4 border-t border-slate-100">
+            <button 
+              onClick={handleLogout}
+              className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-slate-500 hover:bg-rose-50 hover:text-rose-600 transition-all group"
+            >
+              <LogOut size={20} className="shrink-0" />
+              <span className={`font-medium whitespace-nowrap transition-all duration-300 overflow-hidden ${!isSidebarOpen ? 'w-0 opacity-0' : 'w-full opacity-100'}`}>
+                Sair do Sistema
+              </span>
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -259,19 +413,19 @@ function DashboardView({ dashboard, user, onUpdate }: { dashboard: DashboardData
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
 
   const refreshData = () => {
-    fetch('/api/production-logs').then(res => res.json()).then(data => {
+    apiFetch('/api/production-logs').then(res => res.json()).then(data => {
       setRecentLogs(data.slice(-5).reverse());
     });
-    fetch('/api/supplies').then(res => res.json()).then(data => {
+    apiFetch('/api/supplies').then(res => res.json()).then(data => {
       setLowStockItems(data.filter((s: Supply) => s.quantity <= s.min_stock));
     });
-    fetch('/api/orders').then(res => res.json()).then(data => {
+    apiFetch('/api/orders').then(res => res.json()).then(data => {
       setAllOrders(data);
       setActiveOrders(data.slice(-10).reverse());
     });
-    fetch('/api/products').then(res => res.json()).then(setProducts);
-    fetch('/api/operations').then(res => res.json()).then(setOperations);
-    fetch('/api/team').then(res => res.json()).then(setTeam);
+    apiFetch('/api/products').then(res => res.json()).then(setProducts);
+    apiFetch('/api/operations').then(res => res.json()).then(setOperations);
+    apiFetch('/api/team').then(res => res.json()).then(setTeam);
   };
 
   useEffect(() => {
@@ -507,11 +661,11 @@ function InventoryView({ onUpdate }: { onUpdate: () => void }) {
   const [editingItem, setEditingItem] = useState<Supply | null>(null);
 
   useEffect(() => { fetchItems(); }, []);
-  const fetchItems = () => fetch('/api/supplies').then(res => res.json()).then(setItems);
+  const fetchItems = () => apiFetch('/api/supplies').then(res => res.json()).then(setItems);
 
   const handleDelete = async (id: number) => {
     if (confirm('Tem certeza que deseja excluir este insumo?')) {
-      await fetch(`/api/supplies/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/supplies/${id}`, { method: 'DELETE' });
       fetchItems();
       onUpdate();
     }
@@ -596,11 +750,11 @@ function ProductsView({ onUpdate }: { onUpdate: () => void }) {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
   useEffect(() => { fetchProducts(); }, []);
-  const fetchProducts = () => fetch('/api/products').then(res => res.json()).then(setProducts);
+  const fetchProducts = () => apiFetch('/api/products').then(res => res.json()).then(setProducts);
 
   const handleDelete = async (id: number) => {
     if (confirm('Tem certeza que deseja excluir este produto?')) {
-      await fetch(`/api/products/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/products/${id}`, { method: 'DELETE' });
       fetchProducts();
       onUpdate();
     }
@@ -694,11 +848,11 @@ function OperationsView({ onUpdate }: { onUpdate: () => void }) {
   const [editingOp, setEditingOp] = useState<Operation | null>(null);
 
   useEffect(() => { fetchOps(); }, []);
-  const fetchOps = () => fetch('/api/operations').then(res => res.json()).then(setOps);
+  const fetchOps = () => apiFetch('/api/operations').then(res => res.json()).then(setOps);
 
   const handleDelete = async (id: number) => {
     if (confirm('Tem certeza que deseja excluir esta operação?')) {
-      await fetch(`/api/operations/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/operations/${id}`, { method: 'DELETE' });
       fetchOps();
       onUpdate();
     }
@@ -779,11 +933,11 @@ function TeamView({ onUpdate }: { onUpdate: () => void }) {
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
 
   useEffect(() => { fetchMembers(); }, []);
-  const fetchMembers = () => fetch('/api/team').then(res => res.json()).then(setMembers);
+  const fetchMembers = () => apiFetch('/api/team').then(res => res.json()).then(setMembers);
 
   const handleDelete = async (id: number) => {
     if (confirm('Tem certeza que deseja excluir este colaborador?')) {
-      await fetch(`/api/team/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/team/${id}`, { method: 'DELETE' });
       fetchMembers();
       onUpdate();
     }
@@ -859,15 +1013,15 @@ function OrdersView({ onUpdate }: { onUpdate: () => void }) {
 
   useEffect(() => { 
     fetchOrders();
-    fetch('/api/products').then(res => res.json()).then(setProducts);
-    fetch('/api/operations').then(res => res.json()).then(setOperations);
+    apiFetch('/api/products').then(res => res.json()).then(setProducts);
+    apiFetch('/api/operations').then(res => res.json()).then(setOperations);
   }, []);
 
-  const fetchOrders = () => fetch('/api/orders').then(res => res.json()).then(setOrders);
+  const fetchOrders = () => apiFetch('/api/orders').then(res => res.json()).then(setOrders);
 
   const handleDelete = async (id: number) => {
     if (confirm('Tem certeza que deseja excluir esta ordem?')) {
-      await fetch(`/api/orders/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/orders/${id}`, { method: 'DELETE' });
       fetchOrders();
       onUpdate();
     }
@@ -944,7 +1098,7 @@ function OrdersView({ onUpdate }: { onUpdate: () => void }) {
                       <button 
                         onClick={async () => {
                           const nextStatus = status === 'Planejado' ? 'Em Produção' : 'Finalizado';
-                          await fetch(`/api/orders/${order.id}/status`, {
+                          await apiFetch(`/api/orders/${order.id}/status`, {
                             method: 'PATCH',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ status: nextStatus })
@@ -993,13 +1147,13 @@ function ShopFloorView({ onUpdate }: { onUpdate: () => void }) {
   const [selectedOperator, setSelectedOperator] = useState('');
 
   useEffect(() => {
-    fetch('/api/orders').then(res => res.json()).then(data => setOrders(data.filter((o: any) => o.status === 'Em Produção' || o.status === 'Planejado')));
-    fetch('/api/team').then(res => res.json()).then(setTeam);
-    fetch('/api/operations').then(res => res.json()).then(setOps);
+    apiFetch('/api/orders').then(res => res.json()).then(data => setOrders(data.filter((o: any) => o.status === 'Em Produção' || o.status === 'Planejado')));
+    apiFetch('/api/team').then(res => res.json()).then(setTeam);
+    apiFetch('/api/operations').then(res => res.json()).then(setOps);
     fetchLogs();
   }, []);
 
-  const fetchLogs = () => fetch('/api/production-logs').then(res => res.json()).then(setLogs);
+  const fetchLogs = () => apiFetch('/api/production-logs').then(res => res.json()).then(setLogs);
 
   const handleAddToQueue = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1011,7 +1165,7 @@ function ShopFloorView({ onUpdate }: { onUpdate: () => void }) {
       return;
     }
 
-    await fetch('/api/production-logs', {
+    await apiFetch('/api/production-logs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1025,7 +1179,7 @@ function ShopFloorView({ onUpdate }: { onUpdate: () => void }) {
   };
 
   const updateStatus = async (id: number, status: string) => {
-    await fetch(`/api/production-logs/${id}/status`, {
+    await apiFetch(`/api/production-logs/${id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status })
@@ -1128,7 +1282,7 @@ function ShopFloorView({ onUpdate }: { onUpdate: () => void }) {
                         <button 
                           onClick={async () => {
                             if (confirm('Remover este apontamento da fila?')) {
-                              await fetch(`/api/production-logs/${log.id}`, { method: 'DELETE' });
+                              await apiFetch(`/api/production-logs/${log.id}`, { method: 'DELETE' });
                               fetchLogs();
                               onUpdate();
                             }
@@ -1206,9 +1360,9 @@ function ReportsView() {
   const [products, setProducts] = useState<Product[]>([]);
 
   useEffect(() => {
-    fetch('/api/production-logs').then(res => res.json()).then(setLogs);
-    fetch('/api/orders').then(res => res.json()).then(setOrders);
-    fetch('/api/products').then(res => res.json()).then(setProducts);
+    apiFetch('/api/production-logs').then(res => res.json()).then(setLogs);
+    apiFetch('/api/orders').then(res => res.json()).then(setOrders);
+    apiFetch('/api/products').then(res => res.json()).then(setProducts);
   }, []);
 
   const activeOrders = orders.filter(o => o.status !== 'Finalizado');
@@ -1399,7 +1553,7 @@ function SettingsView({ company, user, onUpdate }: { company: CompanyInfo | null
   const [userForm, setUserForm] = useState(user || { name: '', email: '', role: '', photo: '' });
 
   const saveCompany = async () => {
-    await fetch('/api/settings/company', {
+    await apiFetch('/api/settings/company', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(companyForm)
@@ -1409,7 +1563,7 @@ function SettingsView({ company, user, onUpdate }: { company: CompanyInfo | null
   };
 
   const saveProfile = async () => {
-    await fetch('/api/settings/profile', {
+    await apiFetch('/api/settings/profile', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(userForm)
@@ -1550,7 +1704,7 @@ function SupplyForm({ item, onSuccess }: { item: Supply | null, onSuccess: () =>
     e.preventDefault();
     const method = item ? 'PUT' : 'POST';
     const url = item ? `/api/supplies/${item.id}` : '/api/supplies';
-    await fetch(url, {
+    await apiFetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form)
@@ -1602,7 +1756,7 @@ function ProductForm({ product, onSuccess }: { product: Product | null, onSucces
     e.preventDefault();
     const method = product ? 'PUT' : 'POST';
     const url = product ? `/api/products/${product.id}` : '/api/products';
-    await fetch(url, {
+    await apiFetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form)
@@ -1672,7 +1826,7 @@ function OperationForm({ op, onSuccess }: { op: Operation | null, onSuccess: () 
     e.preventDefault();
     const method = op ? 'PUT' : 'POST';
     const url = op ? `/api/operations/${op.id}` : '/api/operations';
-    await fetch(url, {
+    await apiFetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form)
@@ -1720,7 +1874,7 @@ function TeamForm({ member, onSuccess }: { member: TeamMember | null, onSuccess:
     e.preventDefault();
     const method = member ? 'PUT' : 'POST';
     const url = member ? `/api/team/${member.id}` : '/api/team';
-    await fetch(url, {
+    await apiFetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form)
@@ -1770,7 +1924,7 @@ function OrderForm({ order, products, operations, onSuccess }: { order: Producti
     e.preventDefault();
     const method = order ? 'PUT' : 'POST';
     const url = order ? `/api/orders/${order.id}` : '/api/orders';
-    await fetch(url, {
+    await apiFetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form)
@@ -1848,7 +2002,7 @@ function LogForm({ log, orders, team, operations, onSuccess }: { log: Production
     e.preventDefault();
     const method = log ? 'PUT' : 'POST';
     const url = log ? `/api/production-logs/${log.id}` : '/api/production-logs';
-    await fetch(url, {
+    await apiFetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form)
@@ -1859,7 +2013,7 @@ function LogForm({ log, orders, team, operations, onSuccess }: { log: Production
   const handleDelete = async () => {
     if (!log) return;
     if (confirm('Tem certeza que deseja excluir este apontamento?')) {
-      await fetch(`/api/production-logs/${log.id}`, { method: 'DELETE' });
+      await apiFetch(`/api/production-logs/${log.id}`, { method: 'DELETE' });
       onSuccess();
     }
   };
