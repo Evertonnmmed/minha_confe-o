@@ -214,12 +214,12 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session?.user?.id) currentUserId = session.user.id;
+      currentUserId = session?.user?.id || 'default_user';
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session?.user?.id) currentUserId = session.user.id;
+      currentUserId = session?.user?.id || 'default_user';
     });
 
     return () => subscription.unsubscribe();
